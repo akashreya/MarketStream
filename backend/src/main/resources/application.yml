@@ -1,0 +1,47 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: marketstream-consumer-group
+      auto-offset-reset: latest
+      enable-auto-commit: false
+    producer:
+      acks: all
+      retries: 3
+
+  redis:
+    host: localhost
+    port: 6379
+    timeout: 2000ms
+
+  application:
+    name: marketstream
+
+app:
+  kafka:
+    topic:
+      market-data: market-data-topic
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    com.marketstream: DEBUG
+    org.springframework.kafka: INFO
+    org.apache.kafka: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+server:
+  port: 8090

@@ -1,0 +1,4 @@
+This is an attempt to implement LSEG's RFA product with Tools like Kafka.
+
+There are broken things which might need a lot of work.
+Find whats implemented and find out what is required to have a full flow.

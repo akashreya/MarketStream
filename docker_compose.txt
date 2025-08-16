@@ -1,0 +1,421 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9997:9997"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9997
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DELETE_TOPIC_ENABLE: 'true'
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  redis:
+    image: redis:7-alpine
+    hostname: redis
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+  marketstream:
+    build: .
+    container_name: marketstream
+    depends_on:
+      - kafka
+      - redis
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  redis-data:
+
+---
+# Dockerfile
+FROM openjdk:17-jdk-slim
+
+WORKDIR /app
+
+# Install Maven
+RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
+
+# Copy pom.xml first for dependency caching
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+
+# Copy source code
+COPY src ./src
+
+# Build the application
+RUN mvn clean package -DskipTests
+
+# Copy the built jar
+RUN cp target/*.jar app.jar
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+# Expose port
+EXPOSE 8080
+
+# Run the application
+CMD ["java", "-jar", "app.jar"]
+
+---
+# application-docker.yml
+spring:
+  kafka:
+    bootstrap-servers: kafka:29092
+    consumer:
+      group-id: marketstream-consumer-group
+      auto-offset-reset: latest
+      enable-auto-commit: false
+    producer:
+      acks: all
+      retries: 3
+      
+  redis:
+    host: redis
+    port: 6379
+    timeout: 2000ms
+    
+  application:
+    name: marketstream
+
+app:
+  kafka:
+    topic:
+      market-data: market-data-topic
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    com.marketstream: INFO
+    org.springframework.kafka: INFO
+    org.apache.kafka: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: /app/logs/marketstream.log
+
+server:
+  port: 8080
+
+---
+# README.md
+# MarketStream: Modern Real-Time Market Data Delivery Platform
+
+MarketStream is a lightweight, cloud-native, event-driven system that simulates real-time financial market data delivery using modern technologies like Apache Kafka, Spring Boot, WebSockets, and Redis.
+
+## Features
+
+- **Real-time Market Data**: Simulates live price updates for popular stocks
+- **Event-Driven Architecture**: Uses Apache Kafka for reliable message streaming
+- **WebSocket Support**: Real-time updates to connected clients
+- **Snapshot API**: REST endpoints for retrieving latest market data
+- **Redis Caching**: Optional caching layer for improved performance
+- **Modern Frontend**: React-based dashboard for visualizing live data
+- **Monitoring**: Built-in metrics and health checks
+- **Auto-Reconnect**: Automatic reconnection on connection failures
+
+## Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Market Data   │───▶│     Kafka       │───▶│   WebSocket     │
+│   Producer      │    │   (Streaming)   │    │   Consumers     │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                       ┌─────────────────┐
+                       │     Redis       │
+                       │   (Caching)     │
+                       └─────────────────┘
+```
+
+## Tech Stack
+
+- **Backend**: Java 17, Spring Boot 3.x, Apache Kafka, Redis
+- **Frontend**: React 18, WebSocket (STOMP), Chart.js
+- **Infrastructure**: Docker, Docker Compose
+- **Monitoring**: Micrometer, Prometheus, Kafka UI
+
+## Quick Start
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Java 17+ (if running locally)
+- Maven 3.6+ (if running locally)
+
+### Using Docker Compose (Recommended)
+
+1. **Clone and setup**:
+```bash
+git clone <repository-url>
+cd marketstream
+```
+
+2. **Start the entire stack**:
+```bash
+docker-compose up -d
+```
+
+3. **Access the application**:
+- **MarketStream Frontend**: http://localhost:8080
+- **Kafka UI**: http://localhost:8090
+- **Health Check**: http://localhost:8080/actuator/health
+- **Metrics**: http://localhost:8080/actuator/prometheus
+
+### Running Locally
+
+1. **Start Kafka and Redis**:
+```bash
+docker-compose up -d zookeeper kafka redis
+```
+
+2. **Run the application**:
+```bash
+mvn spring-boot:run
+```
+
+3. **Open the frontend**:
+- Copy the HTML file content to a local file
+- Open it in your browser
+- Click "Connect" to start receiving real-time updates
+
+## API Endpoints
+
+### REST API
+
+- `GET /api/market-data/symbols` - Get available symbols
+- `GET /api/market-data/snapshot/{symbol}` - Get latest price for a symbol
+- `GET /api/market-data/snapshots` - Get all latest prices
+- `GET /api/market-data/health` - Health check
+
+### WebSocket
+
+- **Connection**: `/ws` (SockJS endpoint)
+- **Subscribe to all updates**: `/topic/market-data/all`
+- **Subscribe to specific symbol**: `/topic/market-data/{symbol}`
+
+## Configuration
+
+### Application Properties
+
+```yaml
+# Kafka Configuration
+spring.kafka.bootstrap-servers: localhost:9092
+app.kafka.topic.market-data: market-data-topic
+
+# Redis Configuration (Optional)
+spring.redis.host: localhost
+spring.redis.port: 6379
+
+# Server Configuration
+server.port: 8080
+```
+
+### Environment Variables
+
+- `SPRING_KAFKA_BOOTSTRAP_SERVERS`: Kafka broker addresses
+- `SPRING_REDIS_HOST`: Redis host
+- `SPRING_REDIS_PORT`: Redis port
+- `SPRING_PROFILES_ACTIVE`: Active profile (docker, local, etc.)
+
+## Monitoring
+
+### Health Checks
+
+```bash
+curl http://localhost:8080/actuator/health
+```
+
+### Metrics
+
+```bash
+curl http://localhost:8080/actuator/metrics
+curl http://localhost:8080/actuator/prometheus
+```
+
+### Kafka UI
+
+Access Kafka UI at http://localhost:8090 to monitor:
+- Topics and partitions
+- Consumer groups
+- Message throughput
+- Broker status
+
+## Data Format
+
+### Market Data Message
+
+```json
+{
+  "symbol": "AAPL",
+  "price": 150.25,
+  "bidPrice": 150.20,
+  "askPrice": 150.30,
+  "volume": 1500,
+  "change": 2.50,
+  "changePercent": 1.69,
+  "timestamp": "2024-01-01T10:30:00"
+}
+```
+
+## Scaling
+
+### Horizontal Scaling
+
+- **Kafka Partitions**: Increase partitions for parallel processing
+- **Consumer Groups**: Deploy multiple consumer instances
+- **Load Balancing**: Use nginx or similar for multiple app instances
+
+### Performance Tuning
+
+- **Kafka Producer**: Adjust `batch.size`, `linger.ms`, `buffer.memory`
+- **Kafka Consumer**: Tune `max.poll.records`, `fetch.max.wait.ms`
+- **Redis**: Enable persistence and configure memory limits
+
+## Development
+
+### Running Tests
+
+```bash
+mvn test
+```
+
+### Building
+
+```bash
+mvn clean package
+```
+
+### Adding New Symbols
+
+Update the `symbols` list in `MarketDataProducer.java`:
+
+```java
+private final List<String> symbols = Arrays.asList(
+    "AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
+    "TATAINFY", "RELIANCE", "NEW_SYMBOL"
+);
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Kafka Connection Issues**:
+   - Check if Kafka is running: `docker-compose ps`
+   - Verify broker connectivity: `telnet localhost 9092`
+
+2. **WebSocket Connection Failed**:
+   - Ensure the backend is running
+   - Check browser console for errors
+   - Verify CORS settings
+
+3. **Redis Connection Issues**:
+   - Redis is optional; the app falls back to in-memory caching
+   - Check Redis status: `docker-compose logs redis`
+
+### Logs
+
+```bash
+# View application logs
+docker-compose logs marketstream
+
+# View Kafka logs
+docker-compose logs kafka
+
+# View all logs
+docker-compose logs -f
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License.
+
+## Roadmap
+
+- [ ] gRPC support
+- [ ] Historical data storage
+- [ ] Advanced charting
+- [ ] Authentication and authorization
+- [ ] Rate limiting
+- [ ] Circuit breakers
+- [ ] Distributed tracing

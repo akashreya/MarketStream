@@ -1,0 +1,63 @@
+spring:
+  kafka:
+    bootstrap-servers: kafka:29092
+    consumer:
+      group-id: marketstream-consumer-group
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: "com.marketstream.model"
+    producer:
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 1
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+      timeout: 2000ms
+      connect-timeout: 1000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-wait: -1ms
+          max-idle: 8
+          min-idle: 0
+
+  application:
+    name: marketstream
+
+app:
+  kafka:
+    topic:
+      market-data: market-data-topic
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+logging:
+  level:
+    com.marketstream: INFO
+    org.springframework.kafka: INFO
+    org.apache.kafka: WARN
+    org.springframework.data.redis: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: /app/logs/marketstream.log
+
+server:
+  port: 8090

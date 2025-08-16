@@ -1,0 +1,94 @@
+# AWS Free Tier Configuration for t2.micro
+# Optimized for 1 vCPU, 1GB RAM deployment
+
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: marketstream-consumer-group
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      max-poll-records: 50  # Reduced for single CPU
+      max-poll-interval-ms: 30000
+      properties:
+        spring.json.trusted.packages: "com.marketstream.model"
+        fetch.max.wait.ms: 500
+        fetch.min.bytes: 1
+        fetch.max.bytes: 52428800
+    producer:
+      acks: all
+      retries: 3
+      batch-size: 1024  # Smaller batches for single CPU
+      linger-ms: 5
+      buffer-memory: 33554432
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 1
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      connect-timeout: 1000ms
+      lettuce:
+        pool:
+          max-active: 2  # Reduced for t2.micro
+          max-wait: 1000ms
+          max-idle: 2
+          min-idle: 0
+
+  application:
+    name: marketstream
+
+  # Task execution optimization for single CPU
+  task:
+    execution:
+      pool:
+        core-size: 1
+        max-size: 2
+        queue-capacity: 100
+
+app:
+  kafka:
+    topic:
+      market-data: market-data-topic
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: false  # Disabled to save memory
+
+logging:
+  level:
+    com.marketstream: INFO
+    org.springframework.kafka: WARN
+    org.apache.kafka: WARN
+    org.springframework.data.redis: WARN
+    root: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n"
+  file:
+    name: /var/log/supervisor/marketstream-internal.log
+
+server:
+  port: 8091  # Behind nginx proxy
+  tomcat:
+    threads:
+      max: 10  # Reduced for single CPU
+      min-spare: 1
+    max-connections: 200
+    accept-count: 10
+    connection-timeout: 20000
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json
+    min-response-size: 1024

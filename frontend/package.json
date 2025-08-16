@@ -1,0 +1,24 @@
+{
+  "name": "marketstream-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for MarketStream - Real-Time Market Data Platform",
+  "scripts": {
+    "start": "parcel index.html --open",
+    "build": "parcel build index.html --dist-dir build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "sockjs-client": "^1.6.1",
+    "stompjs": "^2.3.3"
+  },
+  "devDependencies": {
+    "parcel": "^2.9.3",
+    "@babel/standalone": "^7.22.20"
+  },
+  "browserslist": [
+    "last 2 Chrome versions",
+    "last 2 Firefox versions",
+    "last 2 Edge versions"
+  ]
+} 

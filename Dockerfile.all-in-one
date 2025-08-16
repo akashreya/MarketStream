@@ -1,0 +1,88 @@
+# All-in-One MarketStream Container for AWS Free Tier
+# Optimized for t3.micro (1GB RAM) deployment
+
+# Stage 1: Build Frontend
+FROM node:18-alpine AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci --only=production
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Build Backend  
+FROM openjdk:21-jdk-slim AS backend-build
+WORKDIR /app
+COPY backend/gradle/ gradle/
+COPY backend/gradlew backend/gradlew.bat ./
+COPY backend/build.gradle backend/settings.gradle ./
+RUN chmod +x ./gradlew
+COPY backend/src ./src
+COPY --from=frontend-build /app/frontend/build ./src/main/resources/static
+RUN ./gradlew build -x test
+
+# Stage 3: All-in-One Runtime (Memory Optimized for AWS Free Tier)
+FROM ubuntu:22.04
+
+# Install required packages in one layer to minimize image size
+RUN apt-get update && apt-get install -y \
+    openjdk-21-jdk \
+    wget \
+    curl \
+    supervisor \
+    redis-server \
+    netcat-openbsd \
+    nginx \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create application directory
+WORKDIR /app
+
+# Install Kafka (lightweight single-node setup)
+ENV KAFKA_VERSION=2.13-3.4.0
+RUN wget -q https://downloads.apache.org/kafka/3.4.0/kafka_${KAFKA_VERSION}.tgz \
+    && tar -xzf kafka_${KAFKA_VERSION}.tgz \
+    && mv kafka_${KAFKA_VERSION} kafka \
+    && rm kafka_${KAFKA_VERSION}.tgz
+
+# Copy application
+COPY --from=backend-build /app/build/libs/*.war app.war
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/data/kafka /app/data/zookeeper /app/data/redis \
+    && mkdir -p /var/log/supervisor
+
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /bin/bash appuser \
+    && chown -R appuser:appuser /app /var/log/supervisor
+
+# Copy configuration files
+COPY docker/all-in-one/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/all-in-one/kafka-server.properties /app/kafka/config/server.properties
+COPY docker/all-in-one/zookeeper.properties /app/kafka/config/zookeeper.properties  
+COPY docker/all-in-one/redis.conf /etc/redis/redis.conf
+COPY docker/all-in-one/nginx.conf /etc/nginx/nginx.conf
+COPY docker/all-in-one/start-services.sh /app/start-services.sh
+
+# Make startup script executable
+RUN chmod +x /app/start-services.sh
+
+# Environment variables for memory optimization
+ENV JAVA_OPTS="-Xms128m -Xmx400m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Djava.security.egd=file:/dev/./urandom"
+ENV KAFKA_HEAP_OPTS="-Xmx128m -Xms64m"
+ENV SPRING_PROFILES_ACTIVE=aws-free-tier
+ENV SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+ENV SPRING_DATA_REDIS_HOST=localhost
+ENV SPRING_DATA_REDIS_PORT=6379
+
+# Expose ports
+EXPOSE 8090 8091 9092
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8090/actuator/health || exit 1
+
+# Switch to non-root user
+USER appuser
+
+# Start all services
+CMD ["/app/start-services.sh"]
